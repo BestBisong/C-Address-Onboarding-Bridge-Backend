@@ -26,6 +26,16 @@ function isValidContractId(id: string): boolean {
   return /^C[A-Z2-7]{55}$/.test(id);
 }
 
+function parseTrustProxy(val: string | undefined): boolean | number | string {
+  if (!val) return false;
+  const lower = val.trim().toLowerCase();
+  if (lower === 'true' || lower === '1') return true;
+  if (lower === 'false' || lower === '0') return false;
+  const n = parseInt(lower, 10);
+  if (!isNaN(n) && String(n) === lower) return n;
+  return val.trim();
+}
+
 /** Centralised runtime configuration derived from environment variables. */
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
@@ -68,17 +78,24 @@ export const config = {
   /** Exchange API credentials for CEX withdrawal routing. Unauthenticated when empty. */
   cex: {
     binance: {
+      baseUrl: process.env.BINANCE_API_BASE_URL || 'https://api.binance.com',
       apiKey: process.env.BINANCE_API_KEY || '',
       apiSecret: process.env.BINANCE_API_SECRET || '',
     },
     coinbase: {
+      baseUrl: process.env.COINBASE_API_BASE_URL || 'https://api.exchange.coinbase.com',
       apiKey: process.env.COINBASE_API_KEY || '',
       apiSecret: process.env.COINBASE_API_SECRET || '',
       passphrase: process.env.COINBASE_API_PASSPHRASE || '',
     },
     kraken: {
+      baseUrl: process.env.KRAKEN_API_BASE_URL || 'https://api.kraken.com',
       apiKey: process.env.KRAKEN_API_KEY || '',
       apiSecret: process.env.KRAKEN_API_SECRET || '',
+    },
+    generic: {
+      baseUrl: process.env.GENERIC_CEX_BASE_URL || '',
+      apiKey: process.env.GENERIC_CEX_API_KEY || '',
     },
   },
   /** Comma-separated list of accepted `X-API-Key` values. Auth is disabled when empty. */
@@ -188,6 +205,9 @@ export const config = {
      */
     backpressureThreshold: parseInt(process.env.ASYNC_BACKPRESSURE_THRESHOLD || '1000', 10),
     /**
-     * How long (ms) the in-process analytics buffer accumulate
-
-/* … truncated 162 chars — edit only what you need near the top … */
+     * How long (ms) the in-process analytics buffer accumulates events before
+     * flushing them as a single batched BullMQ job.
+     */
+    bufferFlushMs: parseInt(process.env.ASYNC_BUFFER_FLUSH_MS || '100', 10),
+  },
+};

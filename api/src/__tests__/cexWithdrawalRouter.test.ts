@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 // @ts-nocheck
 /**
  * TODO(next-bounty): typechecking is off for this file only.
@@ -135,5 +136,83 @@ describe('CEX withdrawal amount units (#609)', () => {
   it('converts stroop amounts to whole units for the generic handler', async () => {
     const result = await defaultCexHandlers.generic(request, cexConfig);
     expect(result.amount).toBe('1');
+  });
+});
+
+describe('Coinbase Exchange withdrawal handler (#880)', () => {
+  it('posts to /withdrawals/crypto with Coinbase Exchange auth headers, decimal amount, and destination_tag', async () => {
+    const fixedTimestampMs = 1600000000000;
+    const fixedTimestampSec = '1600000000';
+    vi.spyOn(Date, 'now').mockReturnValue(fixedTimestampMs);
+
+    const secretRaw = 'my-secret-key-123';
+    const secretBase64 = Buffer.from(secretRaw).toString('base64');
+    const coinbaseConfig = {
+      name: 'coinbase',
+      apiBaseUrl: 'https://api.exchange.coinbase.com',
+      apiKey: 'test-api-key',
+      apiSecret: secretBase64,
+      apiPassphrase: 'test-passphrase',
+    };
+
+    const cbRequest: WithdrawalRequest = {
+      destinationAddress: 'GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3IFH6FCTH7K2',
+      destinationTag: 'memo-12345',
+      asset: 'XLM',
+      amount: '25000000', // 2.5 XLM in stroops
+      network: 'stellar',
+    };
+
+    const expectedBody = JSON.stringify({
+      amount: '2.5',
+      currency: 'XLM',
+      crypto_address: 'GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3IFH6FCTH7K2',
+      destination_tag: 'memo-12345',
+    });
+
+    const expectedPrehash = `${fixedTimestampSec}POST/withdrawals/crypto${expectedBody}`;
+    const expectedSignature = crypto
+      .createHmac('sha256', Buffer.from(secretBase64, 'base64'))
+      .update(expectedPrehash)
+      .digest('base64');
+
+    let capturedUrl: string | undefined;
+    let capturedOptions: RequestInit | undefined;
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string, options: RequestInit) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => '',
+        json: async () => ({ id: 'w-cb-12345' }),
+      };
+    });
+
+    const originalFetch = global.fetch;
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    try {
+      const result = await defaultCexHandlers.coinbase(cbRequest, coinbaseConfig);
+
+      expect(capturedUrl).toBe('https://api.exchange.coinbase.com/withdrawals/crypto');
+      expect(capturedOptions?.method).toBe('POST');
+      expect(capturedOptions?.body).toBe(expectedBody);
+
+      const headers = capturedOptions?.headers as Record<string, string>;
+      expect(headers['Content-Type']).toBe('application/json');
+      expect(headers['CB-ACCESS-KEY']).toBe('test-api-key');
+      expect(headers['CB-ACCESS-PASSPHRASE']).toBe('test-passphrase');
+      expect(headers['CB-ACCESS-TIMESTAMP']).toBe(fixedTimestampSec);
+      expect(headers['CB-ACCESS-SIGN']).toBe(expectedSignature);
+
+      expect(result.success).toBe(true);
+      expect(result.withdrawalId).toBe('cb-w-cb-12345');
+      expect(result.amount).toBe('2.5');
+    } finally {
+      global.fetch = originalFetch;
+      vi.restoreAllMocks();
+    }
   });
 });

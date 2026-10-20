@@ -56,6 +56,7 @@ describe('BridgeClient retry classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const pending = quoteCall(client);
+    pending.catch(() => {});
     // If retries were attempted, their setTimeout delays would fire here.
     await vi.runAllTimersAsync();
 
@@ -86,6 +87,7 @@ describe('BridgeClient retry classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const pending = quoteCall(client);
+    pending.catch(() => {});
     await vi.runAllTimersAsync();
 
     await expect(pending).resolves.toEqual(quote);
@@ -103,6 +105,7 @@ describe('BridgeClient retry classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const pending = quoteCall(client);
+    pending.catch(() => {});
     await vi.runAllTimersAsync();
 
     await expect(pending).rejects.toBeInstanceOf(ValidationError);
@@ -127,6 +130,7 @@ describe('BridgeClient retry classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const pending = quoteCall(client);
+    pending.catch(() => {});
     await vi.runAllTimersAsync();
 
     await expect(pending).resolves.toEqual(quote);
@@ -142,6 +146,7 @@ describe('BridgeClient retry classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const pending = quoteCall(client);
+    pending.catch(() => {});
     await vi.runAllTimersAsync();
 
     // The catch-path re-wraps abort as TimeoutError; the key assertion is that

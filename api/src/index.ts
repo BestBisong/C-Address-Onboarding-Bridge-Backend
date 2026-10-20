@@ -181,13 +181,13 @@ app.use('/api/v1/status', rbacAuth, requireScopes('status:read'), tierRateLimitM
 app.use('/api/v2/status', rbacAuth, requireScopes('status:read'), tierRateLimitMiddleware, statusRouter);
 app.use('/api/v1/offramp', rbacAuth, requireScopes('offramp:write'), tierRateLimitMiddleware, offrampRouter);
 app.use('/api/v2/offramp', rbacAuth, requireScopes('offramp:write'), tierRateLimitMiddleware, offrampRouter);
-app.use('/api/v1/cex', rbacAuth, requireScopes('cex:read'), tierRateLimitMiddleware, cexRouter);
-app.use('/api/v2/cex', rbacAuth, requireScopes('cex:read'), tierRateLimitMiddleware, cexRouter);
+app.use('/api/v1/cex', rbacAuth, tierRateLimitMiddleware, cexRouter);
+app.use('/api/v2/cex', rbacAuth, tierRateLimitMiddleware, cexRouter);
 app.use('/api/quote', rbacAuth, requireScopes('quote:read'), tierRateLimitMiddleware, quoteRouter);
 app.use('/api/fund', rbacAuth, requireScopes('fund:write'), tierRateLimitMiddleware, fundingRouter);
 app.use('/api/status', rbacAuth, requireScopes('status:read'), tierRateLimitMiddleware, statusRouter);
 app.use('/api/offramp', rbacAuth, requireScopes('offramp:write'), tierRateLimitMiddleware, offrampRouter);
-app.use('/api/cex', rbacAuth, requireScopes('cex:read'), tierRateLimitMiddleware, cexRouter);
+app.use('/api/cex', rbacAuth, tierRateLimitMiddleware, cexRouter);
 
 app.use('/api/webhook/moonpay', moonpayWebhookRouter);
 app.use('/api/webhook/transak', transakWebhookRouter);
@@ -201,6 +201,30 @@ app.use('/api/v1/admin', rbacAuth, tierRateLimitMiddleware, adminRouter);
 app.use('/api/v1/cache/metrics', rbacAuth, tierRateLimitMiddleware, cacheMetricsRouter);
 
 // Prometheus metrics — internal only, protected by RBAC
-app.use('
+app.use('/api/v1/metrics', rbacAuth, metricsRouter);
 
-/* … truncated 579 chars — edit only what you need near the top … */
+// xssErrorSanitizer only sanitizes the error and forwards it via next(err);
+// it must run BEFORE errorHandler so errorHandler can map status codes
+// (e.g. Zod validation errors -> 400 validation_error) and hide 5xx messages.
+app.use(xssErrorSanitizer);
+app.use(errorHandler);
+
+registerSignalHandlers();
+
+const server = app.listen(config.port, () => {
+  logger.info({ port: config.port }, 'API server listening');
+});
+
+const wss = createWebSocketServer(server);
+server.on('upgrade', (req, socket, head) => handleUpgrade(wss, req, socket, head));
+
+async function shutdown() {
+  await gracefulShutdown(server);
+  await closePool();
+  await shutdownTracing();
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+export { app, server };

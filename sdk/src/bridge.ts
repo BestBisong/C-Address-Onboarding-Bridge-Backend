@@ -31,6 +31,7 @@ import {
   TimeoutError,
   BridgeError,
   ValidationError,
+  ServerError,
 } from "./errors";
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -238,6 +239,9 @@ export class BridgeClient {
           );
         }
       } catch (error) {
+        if (error instanceof BridgeError) {
+          throw error;
+        }
         // Re-wrap abort as TimeoutError
         if (
           (error instanceof DOMException || error instanceof Error) &&
@@ -250,7 +254,7 @@ export class BridgeClient {
           error instanceof TypeError &&
           !(error instanceof Error && "statusCode" in error)
         ) {
-          const netErr = new NetworkError(error.message, { cause: error });
+          const netErr = new NetworkError(undefined, { cause: error, locale: this.config.locale });
           if (
             this.shouldRetry(netErr) &&
             attempt < this.retryConfig.maxRetries &&

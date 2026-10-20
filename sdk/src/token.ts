@@ -1,6 +1,5 @@
 import { Token, TokenMetadata } from './types';
 import { ValidationError } from './errors';
-import { StrKey } from 'stellar-sdk';
 
 // ─── Token Type Guards ────────────────────────────────────────────────────────
 
@@ -18,14 +17,16 @@ export function isSacToken(token: Token): token is { type: 'sac'; contractId: st
 
 /** Returns `true` if the string is a valid SAC token contract address (C-address). */
 export function isSacTokenAddress(address: string): boolean {
-  return StrKey.isValidContract(address);
+  return typeof address === 'string' && address.startsWith('C') && /^[A-Z2-7]{56}$/.test(address);
 }
 
 /** Validates a SAC token address and throws a typed error if invalid. */
 export function validateSacTokenAddress(address: string): void {
   if (!isSacTokenAddress(address)) {
     throw new ValidationError('Invalid SAC token address', {
-      contractId: `Must be a valid contract address (C-address), got: ${address}`,
+      fields: {
+        contractId: `Must be a valid contract address (C-address), got: ${address}`,
+      },
     });
   }
 }

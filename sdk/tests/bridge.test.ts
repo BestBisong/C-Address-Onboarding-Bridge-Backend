@@ -443,11 +443,7 @@ describe('BridgeClient.runDiagnostics', () => {
   });
 
   it('returns unhealthy when contract status check fails', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ status: 'ok' }) }) // health
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ status: 'ok' }) }) // health latency
-      .mockResolvedValueOnce({ ok: false, status: 500, json: () => Promise.resolve({ message: 'Contract error' }) }) // quote
-    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({ ok: false, status: 500, json: () => Promise.resolve({ message: 'Contract error' }) }));
 
     const result = await client.runDiagnostics({ checkApiKey: false, checkConnectivity: false, checkContractStatus: true });
     expect(result.status).toBe('unhealthy');

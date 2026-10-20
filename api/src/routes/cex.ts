@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { C_ADDRESS_REGEX } from '../utils/constants';
-import { cexService } from '../services/cex';
+import { cexService, CexWithdrawalForbiddenError } from '../services/cex';
 import { exchangeRoutingCount } from '../services/metrics';
 
 /** Express router for CEX withdrawal routing. Mounted at `/api/v1/cex`. */
@@ -24,12 +24,19 @@ export const CEX_WITHDRAW_SCOPE = 'cex:withdraw';
  * never satisfy this check.
  */
 function getCallerScopes(req: Request): string[] {
+  if (req.resolvedScopes && Array.isArray(req.resolvedScopes)) {
+    return req.resolvedScopes;
+  }
   const anyReq = req as Request & {
     apiKey?: { scopes?: unknown };
     auth?: { scopes?: unknown };
     scopes?: unknown;
   };
-  const raw = anyReq.apiKey?.scopes ?? anyReq.auth?.scopes ?? anyReq.scopes;
+  const raw =
+    req.apiKeyRecord?.scopes ??
+    anyReq.apiKey?.scopes ??
+    anyReq.auth?.scopes ??
+    anyReq.scopes;
   if (Array.isArray(raw)) {
     return raw.filter((s): s is string => typeof s === 'string');
   }
@@ -88,6 +95,7 @@ function buildIdempotencyKey(req: Request, body: z.infer<typeof routeSchema>): s
     auth?: { apiKeyId?: unknown; id?: unknown };
   };
   const caller =
+    req.apiKeyRecord?.id ??
     anyReq.apiKey?.id ??
     anyReq.apiKey?.key ??
     anyReq.auth?.apiKeyId ??
@@ -114,7 +122,8 @@ cexRouter.post('/route', requireCexWithdrawScope, async (req: Request, res: Resp
     // legitimate withdrawal with the same parameters is always re-executed.
     let pending = inFlightWithdrawals.get(idempotencyKey);
     if (!pending) {
-      pending = cexService.routeWithdrawal(body);
+      const scopes = getCallerScopes(req);
+      pending = cexService.routeWithdrawal(body, scopes);
       inFlightWithdrawals.set(idempotencyKey, pending);
       pending.finally(() => {
         inFlightWithdrawals.delete(idempotencyKey);
@@ -134,6 +143,13 @@ cexRouter.post('/route', requireCexWithdrawScope, async (req: Request, res: Resp
     exchangeRoutingCount.inc({ exchange: body.exchange, status: 'success' });
     res.status(201).json(result);
   } catch (err) {
+    if (err instanceof CexWithdrawalForbiddenError) {
+      res.status(403).json({
+        error: 'forbidden',
+        message: err.message,
+      });
+      return;
+    }
     const exchange = (req.body as { exchange?: string })?.exchange ?? 'unknown';
     exchangeRoutingCount.inc({ exchange, status: 'failed' });
     next(err);
