@@ -98,8 +98,53 @@ webhookAdminRouter.delete('/registrations/:id', requireScopes('admin:keys'), (re
     res.status(404).json({ error: 'not_found', message: 'registration not found' });
     return;
   }
+  const { url, events, secret } = parsed.data;
+
+  // Store the API key *id* rather than the raw key so the plaintext secret is
+  // never persisted or written to the audit log as the actor.
+  const apiKeyId = req.apiKeyRecord?.id;
+  if (!apiKeyId) {
+    return res.status(401).json({ error: 'missing API key record' });
+  }
+
+  const registration: WebhookRegistration = {
+    id: randomUUID(),
+    url,
+    events,
+    apiKeyId,
+    createdAt: new Date().toISOString(),
+    active: true,
+  };
+
+  registrations.set(registration.id, registration);
+  webhookDeliveryService.register({ id: registration.id, url, events, apiKeyId, secret });
+
+  return res.status(201).json({ id: registration.id, url: registration.url, events: registration.events });
+});
+
+router.get('/', requireScopes('webhooks:read'), (req: Request, res: Response) => {
+  const apiKeyId = req.apiKeyRecord?.id;
+  if (!apiKeyId) {
+    return res.status(401).json({ error: 'missing API key record' });
+  }
+  const list = Array.from(registrations.values())
+    .filter((r) => r.apiKeyId === apiKeyId)
+    .map(({ apiKeyId: _apiKeyId, ...rest }) => rest);
+  return res.json({ registrations: list });
+});
+
+router.delete('/:id', requireScopes('webhooks:write'), (req: Request, res: Response) => {
+  const apiKeyId = req.apiKeyRecord?.id;
+  if (!apiKeyId) {
+    return res.status(401).json({ error: 'missing API key record' });
+  }
+  const registration = registrations.get(req.params.id);
+  if (!registration || registration.apiKeyId !== apiKeyId) {
+    return res.status(404).json({ error: 'registration not found' });
+  }
+  registrations.delete(req.params.id);
   webhookDeliveryService.unregister(req.params.id);
-  res.json({ status: 'deleted' });
+  return res.status(204).send();
 });
 
 // DLQ inspection — list failed deliveries for the calling key

@@ -852,6 +852,14 @@ MIT — see [LICENSE](LICENSE) for details.
 <!-- handsoff-issue-596 -->
 - #596: test(contract): fix and un-ignore test_full_scenario
 
+<!-- handsoff-issue-790 -->
+- #790: bug(contract): WithdrawFees with amount = 0 transfers the cross-token AccumulatedFees total in a single token
+
+<!-- handsoff-issue-792 -->
+- #792: bug(sdk): request() throws ServerError without importing it, so a non-JSON 2xx body becomes a ReferenceError and gets retried
+
+<!-- handsoff-issue-793 -->
+- #793: security(contract): fund_c_address still never calls source.require_auth() (#577 closed)
 <!-- handsoff-issue-799 -->
 - #799: bug(contract): batch_fund_c_address still ignores the paused flag (#579 closed)
 <!-- handsoff-issue-787 -->
