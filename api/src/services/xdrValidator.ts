@@ -52,6 +52,11 @@ export const MAX_FEE_STROOPS = 10_000_000;
  *  Transactions timestamped more than 1 hour in the future are suspicious. */
 export const MAX_FUTURE_TIME_MS = 60 * 60 * 1000;
 
+/** How far into the future (ms) a transaction's minTime may be set. A transaction
+ *  that is not yet valid will be rejected by the network with `txTOO_EARLY`, so we
+ *  reject it up front. A small tolerance absorbs clock skew between us and the client. */
+export const MAX_MIN_TIME_SKEW_MS = 30 * 1000;
+
 /** How long we retain seen transaction hashes for duplicate detection. */
 const SEEN_HASH_TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
@@ -78,6 +83,7 @@ export type XdrValidationCode =
   | 'FEE_TOO_LOW'
   | 'FEE_TOO_HIGH'
   | 'TRANSACTION_EXPIRED'
+  | 'TRANSACTION_NOT_YET_VALID'
   | 'TRANSACTION_TOO_FAR_FUTURE'
   | 'INVALID_SOURCE_ACCOUNT'
   | 'NO_INVOKE_HOST_FUNCTION'

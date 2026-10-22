@@ -143,8 +143,14 @@ export class TimeoutError extends BridgeError {
   readonly timeoutMs: number;
   readonly operation: string;
 
-  constructor(operation: string, timeoutMs: number, options?: { locale?: SupportedLocale }) {
-    super(`Operation "${operation}" timed out after ${timeoutMs} ms.`, { retryable: true });
+  /**
+   * @param options.retryable Override the default retryability. Defaults to
+   *   `true` so callers building their own retry logic can retry idempotent
+   *   requests. The bridge sets this to `false` for non-idempotent requests
+   *   (e.g. POSTs without an idempotency key) that must not be re-sent.
+   */
+  constructor(operation: string, timeoutMs: number, options?: { locale?: SupportedLocale; retryable?: boolean }) {
+    super(`Operation "${operation}" timed out after ${timeoutMs} ms.`, { retryable: options?.retryable ?? true });
     this.name = 'TimeoutError';
     this.timeoutMs = timeoutMs;
     this.operation = operation;

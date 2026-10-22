@@ -852,6 +852,11 @@ MIT — see [LICENSE](LICENSE) for details.
 <!-- handsoff-issue-596 -->
 - #596: test(contract): fix and un-ignore test_full_scenario
 
+<!-- handsoff-issue-826 -->
+- #826: docs(contract): crate-level docs describe fee recipients, auto-withdraw and a single Admin key that don't exist (#233 closed)
+
+<!-- handsoff-issue-829 -->
+- #829: ci: Deploy Contract and deploy-contract.sh look for the WASM in a root target/ directory that the build never creates
 <!-- handsoff-issue-820 -->
 - #820: test(contract): test_full_scenario is still #[ignore]d (#596 closed)
 <!-- handsoff-issue-693 -->
