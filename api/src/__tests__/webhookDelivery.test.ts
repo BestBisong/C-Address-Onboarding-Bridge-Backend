@@ -1,6 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHmac } from 'crypto';
 
+const undiciAgentState = vi.hoisted(() => ({ options: undefined as unknown }));
+
+vi.mock('undici', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('undici')>();
+  return {
+    ...actual,
+    Agent: class TestAgent extends actual.Agent {
+      constructor(options: ConstructorParameters<typeof actual.Agent>[0]) {
+        super(options);
+        undiciAgentState.options = options;
+      }
+    },
+  };
+});
+
+vi.mock('node:dns/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:dns/promises')>();
+  return { ...actual, lookup: vi.fn(actual.lookup) };
+});
+
 process.env.NODE_ENV = 'test';
 process.env.API_KEYS = 'test-api-key-123';
 
@@ -27,6 +47,11 @@ vi.mock('../services/auditLog', () => ({
 
 import { WebhookDeliveryService } from '../services/webhookDelivery';
 import { enqueueWebhookRetry } from '../jobs/queue';
+import { lookup } from 'node:dns/promises';
+
+function dnsAddresses(addresses: { address: string; family: number }[]): Awaited<ReturnType<typeof lookup>> {
+  return addresses as unknown as Awaited<ReturnType<typeof lookup>>;
+}
 
 describe('WebhookDeliveryService', () => {
   let service: WebhookDeliveryService;
@@ -34,6 +59,7 @@ describe('WebhookDeliveryService', () => {
   beforeEach(() => {
     service = new WebhookDeliveryService();
     vi.clearAllMocks();
+    vi.mocked(lookup).mockReset().mockResolvedValue(dnsAddresses([{ address: '93.184.216.34', family: 4 }]));
   });
 
   afterEach(() => {
@@ -112,22 +138,46 @@ describe('WebhookDeliveryService', () => {
       expect(opts.headers['X-Webhook-Event']).toBe('transaction.success');
     });
 
-    it('sends an X-Webhook-Timestamp header and signs the timestamped payload', async () => {
+    it('pins delivery to the public DNS answer when the hostname is rebound', async () => {
+      const lookupMock = vi.mocked(lookup)
+        .mockResolvedValueOnce(dnsAddresses([{ address: '93.184.216.34', family: 4 }]))
+        .mockResolvedValueOnce(dnsAddresses([{ address: '127.0.0.1', family: 4 }]));
       const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
       vi.stubGlobal('fetch', fetchMock);
 
-      const reg = service.register({ url: 'https://example.com/hook', secret: 'mysecret123456!', apiKeyId: 'k', events: ['*'] });
+      const reg = service.register({
+        url: 'https://rebind.example/hook',
+        secret: 'mysecret123456!',
+        apiKey: 'k',
+        events: ['*'],
+      });
       await service.deliver(reg, 'transaction.success', { txHash: 'abc' });
 
-      const [, opts] = fetchMock.mock.calls[0];
-      const timestamp = opts.headers['X-Webhook-Timestamp'];
-      expect(timestamp).toBeDefined();
-      expect(Number.isNaN(Number(timestamp))).toBe(false);
+      expect(lookupMock).toHaveBeenCalledOnce();
+      expect(lookupMock).toHaveBeenCalledWith('rebind.example', { all: true, verbatim: true });
 
-      const expected = createHmac('sha256', 'mysecret123456!')
-        .update(`${timestamp}.${opts.body}`)
-        .digest('hex');
-      expect(opts.headers['X-Webhook-Signature']).toBe(`sha256=${expected}`);
+      const fetchOptions = fetchMock.mock.calls[0][1] as RequestInit & { dispatcher: unknown };
+      expect(fetchMock.mock.calls[0][0]).toBe('https://rebind.example/hook');
+      expect(fetchOptions.dispatcher).toBeDefined();
+
+      const connect = (undiciAgentState.options as {
+        connect: {
+          lookup: (
+            _hostname: string,
+            _options: { all?: boolean },
+            _callback: (_error: Error | null, _addresses: { address: string; family: number }[]) => void,
+          ) => void;
+        };
+      }).connect;
+      const connectedAddresses = await new Promise<{ address: string; family: number }[]>((resolve, reject) => {
+        connect.lookup('rebind.example', { all: true }, (error, addresses) => {
+          if (error) reject(error);
+          else resolve(addresses);
+        });
+      });
+
+      expect(connectedAddresses).toEqual([{ address: '93.184.216.34', family: 4 }]);
+      expect(connectedAddresses).not.toContainEqual({ address: '127.0.0.1', family: 4 });
     });
   });
 

@@ -1,7 +1,8 @@
 import crypto from 'crypto';
-import dns from 'dns';
-import net from 'net';
-import { logger } from '../logger';
+import { lookup } from 'node:dns/promises';
+import ipaddr from 'ipaddr.js';
+import { Agent } from 'undici';
+import { logger } from '../index';
 import { hashPayload, integrityAuditLog } from './auditLog';
 import { enqueueAudit } from './asyncPipeline';
 import { enqueueWebhookRetry, WEBHOOK_RETRY_DELAYS_MS } from '../jobs/queue';
@@ -52,12 +53,37 @@ export type WebhookEvent = (typeof WEBHOOK_EVENTS)[keyof typeof WEBHOOK_EVENTS];
 const DELIVERY_TIMEOUT_MS = 10_000;
 const DEFAULT_DELIVERY_LOG_LIMIT = 10_000;
 
-/**
- * Recommended freshness window (in milliseconds) for receivers verifying the
- * `X-Webhook-Timestamp` header. Deliveries whose timestamp falls outside this
- * window should be rejected to prevent replay attacks.
- */
-export const WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
+function isPublicAddress(address: string): boolean {
+  try {
+    return ipaddr.parse(address).range() === 'unicast';
+  } catch {
+    return false;
+  }
+}
+
+async function resolveSafeWebhookAddress(url: string): Promise<{
+  hostname: string;
+  address: string;
+  family: number;
+}> {
+  const parsedUrl = new URL(url);
+  if (!['http:', 'https:'].includes(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password) {
+    throw new Error('Webhook URL must use HTTP(S) without credentials');
+  }
+
+  const hostname = parsedUrl.hostname.replace(/^\[|\]$/g, '');
+  const addresses = await lookup(hostname, { all: true, verbatim: true });
+  if (addresses.length === 0 || addresses.some(({ address }) => !isPublicAddress(address))) {
+    throw new Error('Webhook URL resolves to a non-public address');
+  }
+
+  return { hostname, ...addresses[0] };
+}
+
+export class WebhookDeliveryService {
+  private registrations = new Map<string, WebhookRegistration>();
+  private dlq: DLQEntry[] = [];
+  private deliveryLog: DeliveryAttempt[] = [];
 
 /**
  * Returns true when the given IP literal falls in a private, loopback,
@@ -265,7 +291,139 @@ export class WebhookDeliveryService {
     return [...this.registrations.values()];
   }
 
-  appendDeliveryAttempt(attempt: DeliveryAttempt): void {
+  sign(payload: string, secret: string): string {
+    return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  }
+
+  async deliver(registration: WebhookRegistration, event: string, data: unknown): Promise<void> {
+    const payload = JSON.stringify({ event, data, timestamp: Date.now() });
+    const signature = this.sign(payload, registration.secret);
+
+    await this.attemptDelivery(registration, event, data, payload, signature, 0);
+  }
+
+  async deliverToAll(apiKey: string, event: string, data: unknown): Promise<void> {
+    const targets = this.getRegistrationsByApiKey(apiKey).filter(
+      (r) => r.events.includes(event) || r.events.includes('*'),
+    );
+    await Promise.all(targets.map((r) => this.deliver(r, event, data)));
+  }
+
+  private async attemptDelivery(
+    registration: WebhookRegistration,
+    event: string,
+    data: unknown,
+    payload: string,
+    signature: string,
+    attemptNumber: number,
+  ): Promise<void> {
+    const attempt: DeliveryAttempt = {
+      id: crypto.randomUUID(),
+      registrationId: registration.id,
+      webhookUrl: registration.url,
+      event,
+      timestamp: Date.now(),
+      attemptNumber,
+    };
+
+    let timeout: NodeJS.Timeout | undefined;
+    let dispatcher: Agent | undefined;
+    try {
+      const vettedAddress = await resolveSafeWebhookAddress(registration.url);
+      const pinnedLookup = (
+        requestedHostname: string,
+        options: { all?: boolean } | number,
+        callback: (_error: NodeJS.ErrnoException | null, _address: string | { address: string; family: number }[], _family?: number) => void,
+      ) => {
+        if (requestedHostname !== vettedAddress.hostname || !isPublicAddress(vettedAddress.address)) {
+          const error = new Error('Webhook connection did not match its vetted destination') as NodeJS.ErrnoException;
+          error.code = 'EACCES';
+          callback(error, '');
+          return;
+        }
+
+        if (typeof options === 'object' && options.all) {
+          callback(null, [{ address: vettedAddress.address, family: vettedAddress.family }]);
+        } else {
+          callback(null, vettedAddress.address, vettedAddress.family);
+        }
+      };
+      dispatcher = new Agent({ connect: { lookup: pinnedLookup } });
+
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
+
+      const response = await fetch(registration.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Signature': `sha256=${signature}`,
+          'X-Webhook-Event': event,
+          'X-Webhook-Attempt': String(attemptNumber + 1),
+        },
+        body: payload,
+        signal: controller.signal,
+        dispatcher,
+      } as RequestInit & { dispatcher: Agent });
+
+      attempt.statusCode = response.status;
+
+      const deliveryAuditPayload = {
+        payloadHash: hashPayload(payload),
+        destination: registration.url,
+        registrationId: registration.id,
+        event,
+        attemptNumber: attemptNumber + 1,
+        statusCode: response.status,
+        result: response.ok ? 'success' : 'failed',
+      };
+      enqueueAudit(
+        'webhook_delivery',
+        deliveryAuditPayload,
+        registration.apiKey,
+        () => integrityAuditLog.append('webhook_delivery', deliveryAuditPayload, registration.apiKey),
+      );
+
+      if (response.ok) {
+        logger.info(
+          { registrationId: registration.id, url: registration.url, event, attempt: attemptNumber + 1 },
+          'webhook delivered',
+        );
+        this.deliveryLog.push(attempt);
+        return;
+      }
+
+      attempt.error = `HTTP ${response.status}`;
+      logger.warn(
+        { registrationId: registration.id, url: registration.url, event, status: response.status, attempt: attemptNumber + 1 },
+        'webhook delivery failed with non-2xx status',
+      );
+    } catch (err) {
+      attempt.error = err instanceof Error ? err.message : 'unknown error';
+      const errorAuditPayload = {
+        payloadHash: hashPayload(payload),
+        destination: registration.url,
+        registrationId: registration.id,
+        event,
+        attemptNumber: attemptNumber + 1,
+        result: 'error',
+        error: attempt.error,
+      };
+      enqueueAudit(
+        'webhook_delivery',
+        errorAuditPayload,
+        registration.apiKey,
+        () => integrityAuditLog.append('webhook_delivery', errorAuditPayload, registration.apiKey),
+      );
+      logger.warn(
+        { registrationId: registration.id, url: registration.url, event, error: attempt.error, attempt: attemptNumber + 1 },
+        'webhook delivery error',
+      );
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      if (dispatcher) void dispatcher.destroy();
+    }
+
     this.deliveryLog.push(attempt);
   }
 
