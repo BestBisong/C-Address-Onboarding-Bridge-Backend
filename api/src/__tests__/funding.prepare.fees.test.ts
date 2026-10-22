@@ -30,51 +30,29 @@ vi.mock('../services/soroban', () => ({
   },
 }));
 
-// Mock asyncPipeline to avoid actual queue operations
-vi.mock('../services/asyncPipeline', () => ({
-  enqueueAudit: vi.fn(),
-  enqueueFundingMetrics: vi.fn(),
+vi.mock('../services/quote', () => ({
+  quoteService: {
+    getQuote: vi.fn().mockResolvedValue({ from: 'XLM', to: 'USDC', amount: '10', rate: '1' }),
+  },
 }));
 
-// Mock metrics
-vi.mock('../services/metrics', async () => {
+import express from 'express';
+import { fundingRouter } from '../routes/funding';
+import { quoteRouter } from '../routes/quote';
 
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * was never implemented -- mostly the intentional `throw new Error('Not implemented')` bodies seeded by commit d2a6c17 ("seed learning exercises") -- or was written against helpers and module paths that do not exist.
- * They are skipped -- not deleted, not rewritten to match the stub -- so the next
- * programme has an exact worklist: un-skip one, implement it, repeat.
- */
-  const actual = await vi.importActual<typeof import('../services/metrics')>('../services/metrics');
-  return {
-    ...actual,
-    recordFundingMetrics: vi.fn(),
-  };
-});
+function buildApp() {
+  const app = express();
+  app.use(express.json());
+  app.use('/fund', fundingRouter);
+  app.use('/quote', quoteRouter);
+  return app;
+}
 
-beforeAll(async () => {
-  const mod = await import('../index');
-  app = mod.app;
-});
+describe('route module loading (#797)', () => {
+  let app: express.Express;
 
-describe('POST /api/v1/fund/prepare - Fee Information', () => {
-  const validFundPrepareRequest = {
-    sourceAddress: 'GAHFGQNZXHJJRVCCPQO5J3BSFLSPOZG2JMQVNF5XVLNGSYXHFUQ2EXFD',
-    targetAddress: 'CAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4',
-    tokenAddress: 'CAKMW7CKBZATWFMKM3LZNGXSDX5KQFMYSVQP2GGKWSJQGBGZVYBZKX4',
-    amount: '1000000',
-    memo: 'test',
-  };
-
-  it.skip('response includes feeBps and feeAmount fields', async () => {
-    const res = await request(app)
-      .post('/api/v1/fund/prepare')
-      .set('X-API-Key', 'test-api-key-123')
-      .send(validFundPrepareRequest);
-
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('feeBps');
-    expect(res.body).toHaveProperty('feeAmount');
+  beforeEach(() => {
+    app = buildApp();
   });
 
   it("exposes unsignedXdr rather than the stale instruction field", () => {

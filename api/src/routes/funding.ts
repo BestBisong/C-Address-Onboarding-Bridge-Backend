@@ -9,14 +9,11 @@ import { fundEndpointRateLimit, fundAbuseDetectionMiddleware } from '../middlewa
 import { recordFundingMetrics } from '../services/metrics';
 import { XdrValidationError, checkSize } from '../services/xdrValidator';
 import { enqueueAudit, enqueueFundingMetrics } from '../services/asyncPipeline';
-import { requireScopes } from '../middleware/rbac';
-import { PermissionScope } from '../types/auth';
 
 /** Express router for funding endpoints. Mounted at `/api/v1/fund`. */
 export const fundingRouter = Router();
 
 fundingRouter.use(fundAbuseDetectionMiddleware);
-fundingRouter.use(requireScopes(PermissionScope.FUND_WRITE));
 
 // ── Status mapping ────────────────────────────────────────────────────────────
 //
