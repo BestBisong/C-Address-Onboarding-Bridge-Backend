@@ -188,7 +188,18 @@ export class QueueFullError extends BridgeError {
 
 // ─── Factory: parse HTTP response into typed error ────────────────────────────
 
+/** A single zod issue as serialized by the API's error handler. */
+interface ErrorDetail {
+  path?: Array<string | number> | string;
+  message?: string;
+}
+
 interface ErrorBody {
+  /** API error code, e.g. `validation_error`, `expired_api_key`. */
+  error?: string;
+  /** zod issues for validation failures. */
+  details?: ErrorDetail[];
+  /** Legacy / alternate fields. */
   message?: string;
   code?: string;
   fields?: Record<string, string>;
@@ -236,15 +247,15 @@ export function parseHttpError(
   switch (status) {
     case 401:
     case 403:
-      return new AuthError(body.message, { statusCode: status, code: body.code, cause, locale });
+      return new AuthError(message, { statusCode: status, code, cause, locale });
     case 400:
     case 422:
       return new ValidationError(
-        body.message ?? `Validation error: ${body.code ?? 'invalid request'}.`,
-        { statusCode: status, code: body.code, fields: body.fields, cause, locale },
+        message ?? `Validation error: ${code ?? 'invalid request'}.`,
+        { statusCode: status, code, fields, cause, locale },
       );
     case 404:
-      return new NotFoundError(body.message, { code: body.code, cause, locale });
+      return new NotFoundError(message, { code, cause, locale });
     case 429:
       return new RateLimitError(body.message, {
         retryAfterMs,
@@ -266,7 +277,7 @@ export function parseHttpError(
           cause,
         });
       }
-      return new BridgeError(body.message ?? `Request failed with status ${status}.`, {
+      return new BridgeError(message ?? `Request failed with status ${status}.`, {
         statusCode: status,
         code: body.code,
         cause,

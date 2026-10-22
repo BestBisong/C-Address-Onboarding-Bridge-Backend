@@ -243,18 +243,18 @@ function parseEnvelope(
   return parsed;
 }
 
-function checkNetwork(tx: Transaction, expectedPassphrase: string): void {
-  if (tx.networkPassphrase !== expectedPassphrase) {
+function checkNetwork(tx: Transaction, networkPassphrase: string): void {
+  if (tx.networkPassphrase !== networkPassphrase) {
     throw new XdrValidationError(
       'WRONG_NETWORK',
-      `Transaction was built for network "${tx.networkPassphrase}" but this server expects "${expectedPassphrase}"`,
+      `Transaction was built for network "${tx.networkPassphrase}" but this server expects "${networkPassphrase}"`,
     );
   }
 }
 
 function checkFee(tx: Transaction): void {
   const fee = Number(tx.fee);
-  if (fee < MIN_FEE_STROOPS) {
+  if (!Number.isFinite(fee) || fee < MIN_FEE_STROOPS) {
     throw new XdrValidationError(
       'FEE_TOO_LOW',
       `Transaction fee ${fee} stroops is below the minimum of ${MIN_FEE_STROOPS}`,
@@ -270,23 +270,24 @@ function checkFee(tx: Transaction): void {
 
 function checkTimeBounds(tx: Transaction): void {
   const now = Date.now();
-  const { timeBounds } = tx;
+  const timeBounds = tx.timeBounds;
   if (!timeBounds) return;
 
-  const minTime = Number(timeBounds.minTime) * 1000;
-  const maxTime = Number(timeBounds.maxTime) * 1000;
-
-  if (maxTime !== 0 && maxTime < now) {
-    throw new XdrValidationError(
-      'TRANSACTION_EXPIRED',
-      `Transaction expired at ${new Date(maxTime).toISOString()}`,
-    );
-  }
-  if (minTime !== 0 && minTime > now + MAX_FUTURE_TIME_MS) {
-    throw new XdrValidationError(
-      'TRANSACTION_TOO_FAR_FUTURE',
-      `Transaction minTime ${new Date(minTime).toISOString()} is too far in the future`,
-    );
+  const maxTime = Number(timeBounds.maxTime);
+  if (maxTime !== 0) {
+    const maxTimeMs = maxTime * 1000;
+    if (maxTimeMs < now) {
+      throw new XdrValidationError(
+        'TRANSACTION_EXPIRED',
+        `Transaction expired at ${new Date(maxTimeMs).toISOString()}`,
+      );
+    }
+    if (maxTimeMs > now + MAX_FUTURE_TIME_MS) {
+      throw new XdrValidationError(
+        'TRANSACTION_TOO_FAR_FUTURE',
+        `Transaction maxTime ${new Date(maxTimeMs).toISOString()} is more than 1 hour in the future`,
+      );
+    }
   }
 }
 
@@ -300,7 +301,11 @@ function checkSourceAccount(tx: Transaction): void {
   }
 }
 
-function checkOperations(tx: Transaction, contractId: string | undefined, allowedFunctions: readonly string[]): void {
+function checkOperations(
+  tx: Transaction,
+  contractId: string | undefined,
+  allowedFunctions: readonly string[],
+): void {
   const ops = tx.operations;
   if (ops.length !== 1) {
     throw new XdrValidationError(
@@ -313,7 +318,7 @@ function checkOperations(tx: Transaction, contractId: string | undefined, allowe
   if (op.type !== 'invokeHostFunction') {
     throw new XdrValidationError(
       'NO_INVOKE_HOST_FUNCTION',
-      `Expected invokeHostFunction operation, found ${op.type}`,
+      `Expected an invokeHostFunction operation, found "${op.type}"`,
     );
   }
 
@@ -321,11 +326,22 @@ function checkOperations(tx: Transaction, contractId: string | undefined, allowe
   if (hostFn.switch().name !== 'hostFunctionTypeInvokeContract') {
     throw new XdrValidationError(
       'UNSUPPORTED_HOST_FUNCTION',
-      `Expected invokeContract host function, found ${hostFn.switch().name}`,
+      `Expected invokeContract host function, found "${hostFn.switch().name}"`,
     );
   }
 
   const invokeContract = hostFn.invokeContract();
+  const contractAddress = StrKey.encodeContract(
+    invokeContract.contractAddress().contractId(),
+  );
+
+  if (contractId && contractAddress !== contractId) {
+    throw new XdrValidationError(
+      'WRONG_CONTRACT',
+      `Transaction targets contract ${contractAddress} but this server expects ${contractId}`,
+    );
+  }
+
   const fnName = invokeContract.functionName().toString();
   if (!allowedFunctions.includes(fnName)) {
     throw new XdrValidationError(
@@ -349,7 +365,7 @@ function checkOperations(tx: Transaction, contractId: string | undefined, allowe
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Validates a base64-encoded signed transaction envelope.
+ * Validates a base64-encoded signed Soroban transaction envelope.
  *
  * @throws {XdrValidationError} on the first rule that fails.
  */
@@ -357,15 +373,12 @@ export function validateXdr(
   xdrString: string,
   options: XdrValidationOptions = {},
 ): XdrValidationResult {
-  const networkPassphrase = options.networkPassphrase ?? config.STELLAR_NETWORK_PASSPHRASE;
+  const networkPassphrase = options.networkPassphrase ?? config.soroban.networkPassphrase;
   const contractId = options.skipContractCheck
     ? undefined
-    : options.contractId ?? config.BRIDGE_CONTRACT_ID;
+    : options.contractId ?? config.soroban.bridgeContractId;
+
   const maxByteLength = options.maxByteLength ?? MAX_XDR_BYTE_LENGTH;
-  const allowedFunctions =
-    options.allowedFunctions ??
-    (options.endpoint ? ALLOWED_FUNCTIONS_BY_ENDPOINT[options.endpoint] : undefined) ??
-    DEFAULT_ALLOWED_FUNCTIONS;
 
   // 1. Size guard
   checkSize(xdrString, maxByteLength);
@@ -388,10 +401,15 @@ export function validateXdr(
   // 7. Source account
   checkSourceAccount(tx);
 
-  // 8–10. Operations, host function, contract, function name
+  // 8. Operation type / 9. Host function / 10. Function name
+  const allowedFunctions =
+    options.allowedFunctions ??
+    (options.endpoint
+      ? ALLOWED_FUNCTIONS_BY_ENDPOINT[options.endpoint] ?? DEFAULT_ALLOWED_FUNCTIONS
+      : DEFAULT_ALLOWED_FUNCTIONS);
   checkOperations(tx, contractId, allowedFunctions);
 
-  // 11. Duplicate hash — pure read; recording happens after RPC acceptance.
+  // 11. Duplicate hash
   const txHash = tx.hash().toString('hex');
   if (hasSeenHash(txHash)) {
     throw new XdrValidationError(
@@ -399,6 +417,8 @@ export function validateXdr(
       `Transaction ${txHash} has already been submitted`,
     );
   }
+
+  logger.debug('XDR validation passed', { txHash, sourceAccount: tx.source });
 
   return {
     valid: true,
