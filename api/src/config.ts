@@ -27,28 +27,28 @@ function isValidContractId(id: string): boolean {
 }
 
 /**
- * Parse the TRUST_PROXY environment variable into a value suitable for
- * `app.set('trust proxy', ...)`.
+ * Parse the `TRUST_PROXY` env var into a value suitable for Express'
+ * `app.set('trust proxy', …)`.
  *
- * Accepts:
- *  - a hop count, e.g. `1` or `2`
- *  - a comma-separated list of IPs/CIDRs, e.g. `10.0.0.0/8,192.168.1.1`
- *  - a boolean-ish string (`true`/`false`)
- *
- * Defaults to `false` (trust proxy disabled) so that deployments without a
- * load balancer keep using the socket address as `req.ip`.
+ * Accepted forms:
+ * - `undefined` / empty → `false` (do not trust any proxy)
+ * - `true` / `false` → boolean
+ * - a non-negative integer → hop count (e.g. `1`)
+ * - a comma-separated list of subnets/IPs → string[] (e.g. `10.0.0.0/8,192.168.1.1`)
  */
-export function parseTrustProxy(raw: string | undefined): boolean | number | string[] {
-  const value = (raw || '').trim();
-  if (!value) return false;
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  if (/^\d+$/.test(value)) return parseInt(value, 10);
-  const list = value
+export function parseTrustProxy(
+  value: string | undefined,
+): boolean | number | string[] {
+  if (value === undefined) return false;
+  const trimmed = value.trim();
+  if (trimmed === '') return false;
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+  return trimmed
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean);
-  return list.length > 0 ? list : false;
 }
 
 /** Centralised runtime configuration derived from environment variables. */
@@ -197,28 +197,15 @@ export const config = {
       webhookRetry: parseInt(process.env.JOB_CONCURRENCY_WEBHOOK_RETRY || '3', 10),
       cacheWarmup: parseInt(process.env.JOB_CONCURRENCY_CACHE_WARMUP || '2', 10),
       metrics: parseInt(process.env.JOB_CONCURRENCY_METRICS || '1', 10),
-      asyncAudit: parseInt(process.env.JOB_CONCURRENCY_ASYNC_AUDIT || '2', 10),
-      asyncPipeline: parseInt(process.env.JOB_CONCURRENCY_ASYNC_PIPELINE || '5', 10),
     },
   },
   asyncPipeline: {
-    /**
-     * Master switch. When false every call falls through to the synchronous
-     * path so the pipeline is completely transparent to callers.
-     * Defaults to enabled whenever a REDIS_URL is configured.
-     */
-    enabled: process.env.ASYNC_PIPELINE_ENABLED !== 'false'
-      && (process.env.REDIS_URL !== undefined && process.env.REDIS_URL !== ''),
-    /**
-     * Number of waiting jobs in the best-effort queue above which the pipeline
-     * is considered backpressured. Non-critical ops are dropped while over
-     * this threshold.
-     */
+    enabled: process.env.ASYNC_PIPELINE_ENABLED !== 'false',
     backpressureThreshold: parseInt(process.env.ASYNC_BACKPRESSURE_THRESHOLD || '1000', 10),
     /**
      * How long (ms) the in-process analytics buffer accumulates events before
-     * flushing them as a single batched BullMQ job.
+     * flushing them downstream. Restored from the truncated tail of this file.
      */
-    bufferFlushMs: parseInt(process.env.ASYNC_BUFFER_FLUSH_MS || '100', 10),
+    bufferFlushMs: parseInt(process.env.ASYNC_BUFFER_FLUSH_MS || '5000', 10),
   },
 };

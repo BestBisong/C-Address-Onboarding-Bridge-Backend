@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import request from 'supertest';
 
 process.env.NODE_ENV = 'test';
 
@@ -27,6 +28,7 @@ vi.mock('../services/rpcPool', () => ({
 }));
 
 import { getHealthStatus, invalidateHealthCache } from '../services/health';
+import app from '../index';
 
 /**
  * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
@@ -97,5 +99,19 @@ describe('getHealthStatus', () => {
     const result = await getHealthStatus(true);
     expect(result.dependencies.soroban.ok).toBe(false);
     expect(result.status).toBe('unhealthy');
+  });
+});
+
+describe('app smoke test', () => {
+  it('GET /health/live returns 200', async () => {
+    const res = await request(app).get('/health/live');
+    expect(res.status).toBe(200);
+  });
+
+  it('unknown route returns JSON error from errorHandler', async () => {
+    const res = await request(app).get('/__definitely-not-a-route__');
+    expect([404, 500]).toContain(res.status);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+    expect(res.body).toHaveProperty('error');
   });
 });
