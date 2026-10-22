@@ -16,13 +16,6 @@ import {
   getDefaultDecimals,
 } from '../src/utils';
 
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * depends on SDK helpers that are still `throw new Error('Not implemented: ...')` stubs.
- * They are skipped -- not deleted, not rewritten to match the stub -- so the next
- * programme has an exact worklist: un-skip one, implement it, repeat.
- */
-
 const VALID_C_ADDR = 'CABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
 const VALID_G_ADDR = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
 
@@ -42,7 +35,7 @@ describe('BridgeClient', () => {
     expect(client).toBeInstanceOf(BridgeClient);
   });
 
-  it.skip('fetches token metadata for a SAC token', async () => {
+  it('fetches token metadata for a SAC token', async () => {
     const client = new BridgeClient({ baseUrl: 'http://localhost:3001' });
     const mockMeta = {
       decimals: 6,
@@ -70,7 +63,7 @@ describe('BridgeClient', () => {
     expect(result.name).toBe('Stellar Lumens');
   });
 
-  it.skip('getQuote works with SAC token parameter', async () => {
+  it('getQuote works with SAC token parameter', async () => {
     const client = new BridgeClient({ baseUrl: 'http://localhost:3001' });
     const mockQuote = {
       estimatedFee: '100',
@@ -302,13 +295,13 @@ describe('BridgeClient.runDiagnostics', () => {
 });
 
 describe('Utils', () => {
-  it.skip('calculates fee correctly', () => {
+  it('calculates fee correctly', () => {
     expect(calculateFee(1000n, 100)).toBe(10n);
     expect(calculateFee(1000n, 0)).toBe(0n);
     expect(calculateFee(10000n, 50)).toBe(50n);
   });
 
-  it.skip('calculates receive amount correctly', () => {
+  it('calculates receive amount correctly', () => {
     expect(calculateReceiveAmount(1000n, 100)).toBe(990n);
     expect(calculateReceiveAmount(1000n, 0)).toBe(1000n);
   });

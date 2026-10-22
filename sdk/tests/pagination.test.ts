@@ -3,13 +3,6 @@ import { getEventListeners } from 'node:events';
 import { PaginationHelper, paginateAll, collectAllPages } from '../src/pagination';
 import type { PaginatedResponse, PageFetcher } from '../src/types';
 
-/**
- * TODO(next-bounty): the tests marked `.skip` in this file assert behaviour that
- * depends on SDK helpers that are still `throw new Error('Not implemented: ...')` stubs.
- * They are skipped -- not deleted, not rewritten to match the stub -- so the next
- * programme has an exact worklist: un-skip one, implement it, repeat.
- */
-
 const mockPage1: PaginatedResponse<{ id: string }> = {
   data: [{ id: 'a' }, { id: 'b' }],
   nextCursor: 'cursor-2',
