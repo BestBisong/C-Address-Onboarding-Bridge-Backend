@@ -1,5 +1,5 @@
-import { SDK_VERSION } from './version';
-import { unrefTimer } from './utils';
+import { SDK_VERSION } from './version.js';
+import { unrefTimer } from './utils.js';
 
 export { SDK_VERSION };
 

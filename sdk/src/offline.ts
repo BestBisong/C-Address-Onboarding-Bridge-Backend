@@ -1,8 +1,8 @@
-import { QueueEntry, OfflineQueueOptions, StorageAdapter, RequestOptions, HttpMethod } from './types';
-import { BridgeClient, BridgeClientConfig } from './bridge';
-import { OfflineError, QueueFullError, TimeoutError, NetworkError } from './errors';
-import type { SupportedLocale } from './i18n/types';
-import { unrefTimer } from './utils';
+import { QueueEntry, OfflineQueueOptions, StorageAdapter, RequestOptions, HttpMethod } from './types.js';
+import { BridgeClient, BridgeClientConfig } from './bridge.js';
+import { OfflineError, QueueFullError, TimeoutError, NetworkError } from './errors.js';
+import type { SupportedLocale } from './i18n/types.js';
+import { unrefTimer } from './utils.js';
 
 const QUEUE_STORAGE_KEY = 'bridge_sdk_offline_queue';
 
@@ -230,7 +230,7 @@ export class OfflineQueue {
 }
 
 // Import shared idempotency key generator from utils
-import { generateIdempotencyKey } from './utils';
+import { generateIdempotencyKey } from './utils.js';
 
 export class OfflineBridgeClient extends BridgeClient {
   readonly offlineQueue: OfflineQueue;

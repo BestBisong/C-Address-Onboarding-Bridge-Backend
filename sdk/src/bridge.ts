@@ -20,11 +20,11 @@ import {
   Token,
   TokenMetadata,
   TokenMetadataParams,
-} from "./types";
-import { tokenToSourceAsset, tokenFromLegacy, getDefaultDecimals, isSacTokenAddress, isSacToken, validateSacTokenAddress } from "./token";
-import { generateIdempotencyKey } from "./utils";
-import { SimpleCache } from "./cache";
-import { TelemetryClient } from "./telemetry";
+} from "./types.js";
+import { tokenToSourceAsset, tokenFromLegacy, getDefaultDecimals, isSacTokenAddress, isSacToken, validateSacTokenAddress } from "./token.js";
+import { generateIdempotencyKey } from "./utils.js";
+import { SimpleCache } from "./cache.js";
+import { TelemetryClient } from "./telemetry.js";
 import {
   parseHttpError,
   NetworkError,
@@ -32,12 +32,12 @@ import {
   BridgeError,
   ServerError,
   ValidationError,
-} from "./errors";
+} from "./errors.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
-export type { BridgeClientConfig } from "./types";
-import type { BridgeClientConfig } from "./types";
+export type { BridgeClientConfig } from "./types.js";
+import type { BridgeClientConfig } from "./types.js";
 
 // ─── HMAC-SHA256 signing helpers ───────────────────────────────────────────────
 

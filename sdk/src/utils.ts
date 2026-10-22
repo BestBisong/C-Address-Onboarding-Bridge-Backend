@@ -1,4 +1,4 @@
-import { ValidationError } from './errors';
+import { ValidationError } from './errors.js';
 
 /**
  * Prevents a Node.js timer from keeping the process alive. Browsers (and
@@ -151,4 +151,4 @@ export {
   getDefaultDecimals,
   isNativeToken,
   isSacToken,
-} from './token';
+} from './token.js';
