@@ -117,6 +117,10 @@ export const config = {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean),
+  /** Shared secret used to verify request signing HMAC signatures.
+   * Each API key record may store its own signing secret; this is the
+   * global fallback. */
+  signingSecret: process.env.SIGNING_SECRET || '',
   /** Shared secret sent by CloudFront as X-Origin-Verify. Enforced by
    * originVerifyMiddleware when ORIGIN_VERIFY_SECRET is set. */
   originVerifySecret: process.env.ORIGIN_VERIFY_SECRET || '',

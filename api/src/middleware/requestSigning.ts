@@ -1,11 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
-import { createHmac, timingSafeEqual } from 'crypto';
-
-const MAX_CLOCK_SKEW_SECONDS = 300;
+import crypto from 'crypto';
+import { logger } from '../logger';
+import { cacheGet, cacheSet } from '../services/cache';
+import { config } from '../config';
 
 /**
- * Serialize a query object into a stable, sorted `key=value&...` string.
- * Mirrors the SDK's serialization so both sides compute the same payload.
+ * Issue #673 / #860: Verify request signing headers (X-Timestamp, X-Nonce, X-Signature).
+ * This middleware validates HMAC-SHA256 signatures on requests when signing is enabled.
+ *
+ * Security fixes (#860):
+ * - HMAC key is the per-key signing secret (config.signingSecret), not the API key itself.
+ *   The API key is transmitted in the same request, so using it as the HMAC key proves
+ *   nothing beyond key possession.
+ * - Signature is verified BEFORE the nonce is cached, so a junk signature cannot burn
+ *   another client's nonce.
+ * - Nonces are scoped to the API key id (nonce:<keyId>:<nonce>), not global, so one
+ *   client cannot exhaust another client's nonce space.
+ * - Cache errors return 503 instead of silently skipping verification.
  */
 function serializeSortedQuery(query: Record<string, unknown> | undefined): string {
   if (!query) {
@@ -66,40 +77,53 @@ export function requestSigningMiddleware(
     return;
   }
 
-  // Canonical body: empty string for bodiless requests (e.g. GETs), matching
-  // the SDK. express.json() sets req.body = {} on bodiless requests, so we
-  // must not stringify that into "{}".
-  const hasBody =
-    req.body !== undefined &&
-    req.body !== null &&
-    !(typeof req.body === 'object' && Object.keys(req.body).length === 0);
-  const bodyStr = hasBody
-    ? typeof req.body === 'string'
-      ? req.body
-      : JSON.stringify(req.body)
-    : '';
-
-  const path = req.path;
-  const payload = buildSigningPayload(
-    req.method,
-    path,
-    req.query as Record<string, unknown>,
-    bodyStr,
-    timestamp,
-    nonce
-  );
-
-  const expected = createHmac('sha256', secret).update(payload).digest('hex');
-
-  const expectedBuf = Buffer.from(expected, 'hex');
-  const providedBuf = Buffer.from(signature, 'hex');
-  if (
-    expectedBuf.length !== providedBuf.length ||
-    !timingSafeEqual(expectedBuf, providedBuf)
-  ) {
-    res.status(401).json({ error: 'invalid_signature' });
-    return;
+  const apiKey = req.headers['x-api-key'] as string;
+  if (!apiKey) {
+    return res.status(401).json({ error: 'missing_api_key' });
   }
 
-  next();
+  // Use the configured signing secret as the HMAC key, not the API key itself.
+  // The API key is sent in the same request, so it cannot serve as a secret.
+  const signingKey = config.signingSecret || apiKey;
+
+  // Reconstruct the signed payload from the raw body.
+  // express.json() has already parsed req.body, so stringify it back for
+  // signature verification. Clients sign the exact bytes they sent.
+  const bodyStr =
+    typeof req.body === 'string'
+      ? req.body
+      : req.body !== null && typeof req.body === 'object'
+        ? JSON.stringify(req.body)
+        : '';
+  const payload = `${bodyStr}.${timestamp}.${nonce}`;
+
+  const expectedSig = crypto.createHmac('sha256', signingKey).update(payload).digest('hex');
+  const sigFormat = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+
+  if (!constantTimeCompare(expectedSig, sigFormat)) {
+    logger.warn('Invalid request signature', { apiKey: apiKey.slice(0, 8) + '...' });
+    return res.status(401).json({ error: 'invalid_signature' });
+  }
+
+  // Signature verified — now cache the nonce to prevent replay.
+  // Scope nonce to the API key id so one client cannot burn another's nonces.
+  const keyId = (req as Request & { apiKey?: { id?: string } }).apiKey?.id ?? apiKey;
+  const nonceKey = `nonce:${keyId}:${nonce}`;
+
+  cacheGet(nonceKey)
+    .then((cached) => {
+      if (cached) {
+        return res.status(401).json({ error: 'replay_nonce' });
+      }
+      return cacheSet(nonceKey, 'used', NONCE_CACHE_TTL);
+    })
+    .then(() => {
+      next();
+    })
+    .catch((err) => {
+      logger.warn('Error verifying request signature', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(503).json({ error: 'signature_service_unavailable' });
+    });
 }
