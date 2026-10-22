@@ -18,6 +18,26 @@ export const fundingRouter = Router();
 fundingRouter.use(fundAbuseDetectionMiddleware);
 fundingRouter.use(requireScopes(PermissionScope.FUND_WRITE));
 
+// ── Status mapping ────────────────────────────────────────────────────────────
+//
+// #845: Only `pending`/`success` submissions are a 201 Created. A rejected
+// transaction (`failed`) maps to 422 and an expired one to 410 so clients that
+// branch on the HTTP status do not treat a rejected transaction as created.
+
+function submissionHttpStatus(status: string): number {
+  switch (status) {
+    case 'pending':
+    case 'success':
+      return 201;
+    case 'failed':
+      return 422;
+    case 'expired':
+      return 410;
+    default:
+      return 201;
+  }
+}
+
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
 const fundSchema = z.object({
@@ -150,7 +170,8 @@ fundingRouter.post('/', fundEndpointRateLimit, idempotencyMiddleware, async (req
     const metricsInput = { source: 'api' as const, status: result.status, funderId: actor };
     enqueueFundingMetrics(metricsInput, () => recordFundingMetrics(metricsInput));
 
-    res.status(201).json({
+    // #845: map submission status to the correct HTTP status code.
+    res.status(submissionHttpStatus(result.status)).json({
       ...result,
       explorerUrl: explorerService.txUrl(result.hash),
       explorerUrls: explorerService.txUrlWithFallbacks(result.hash),
@@ -231,6 +252,7 @@ fundingRouter.post('/batch', fundEndpointRateLimit, idempotencyMiddleware, async
         signedXdrHash: hashPayload(body.signedXdr),
         recipients: xdrRecipients,
         error: result.error,
+        recipientCount: body.recipients.length,
       },
       actor,
       () => integrityAuditLog.append(
@@ -251,7 +273,72 @@ fundingRouter.post('/batch', fundEndpointRateLimit, idempotencyMiddleware, async
     const metricsInput = { source: 'api' as const, status: result.status, funderId: actor };
     enqueueFundingMetrics(metricsInput, () => recordFundingMetrics(metricsInput));
 
-    res.status(201).json({
+    // #845: map submission status to the correct HTTP status code.
+    res.status(submissionHttpStatus(result.status)).json({
+      ...result,
+      explorerUrl: explorerService.txUrl(result.hash),
+      explorerUrls: explorerService.txUrlWithFallbacks(result.hash),
+    });
+  } catch (err) {
+    if (err instanceof XdrValidationError) {
+      res.status(400).json({ error: err.code, message: err.detail });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ── POST /direct ──────────────────────────────────────────────────────────────
+
+fundingRouter.post('/direct', fundEndpointRateLimit, idempotencyMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    req.log?.info({ path: req.path }, 'direct fund transaction submission started');
+    const body = fundDirectSchema.parse(req.body);
+
+    const result = await sorobanService.submitDirectFunding(
+      body.sourceAddress,
+      body.targetAddress,
+      body.tokenAddress,
+      body.amount,
+      body.memo,
+    );
+
+    const actor = req.apiKeyRecord?.id ?? 'api-key';
+
+    enqueueAudit(
+      'transaction_submission_result',
+      {
+        txHash: result.hash,
+        status: result.status,
+        sourceAddress: body.sourceAddress,
+        targetAddress: body.targetAddress,
+        tokenAddress: body.tokenAddress,
+        amount: body.amount,
+        error: result.error,
+      },
+      actor,
+      () => integrityAuditLog.append(
+        'transaction_submission_result',
+        {
+          txHash: result.hash,
+          status: result.status,
+          sourceAddress: body.sourceAddress,
+          targetAddress: body.targetAddress,
+          tokenAddress: body.tokenAddress,
+          amount: body.amount,
+          error: result.error,
+        },
+        actor,
+      ),
+    );
+
+    req.log?.info({ txHash: result.hash, status: result.status }, 'direct fund transaction submitted');
+
+    const metricsInput = { source: 'api' as const, status: result.status, funderId: actor };
+    enqueueFundingMetrics(metricsInput, () => recordFundingMetrics(metricsInput));
+
+    // #845: map submission status to the correct HTTP status code.
+    res.status(submissionHttpStatus(result.status)).json({
       ...result,
       explorerUrl: explorerService.txUrl(result.hash),
       explorerUrls: explorerService.txUrlWithFallbacks(result.hash),

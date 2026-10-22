@@ -254,7 +254,11 @@ export function parseHttpError(
       });
     default:
       if (status >= 500) {
-        return new ServerError(body.message, { statusCode: status, code: body.code, cause });
+        return new ServerError(body.message ?? `Server error (${status}).`, {
+          statusCode: status,
+          code: body.code,
+          cause,
+        });
       }
       return new BridgeError(body.message ?? `Request failed with status ${status}.`, {
         statusCode: status,

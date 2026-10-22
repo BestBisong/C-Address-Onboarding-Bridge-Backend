@@ -1,6 +1,6 @@
 import { QueueEntry, OfflineQueueOptions, StorageAdapter, RequestOptions, HttpMethod } from './types';
 import { BridgeClient, BridgeClientConfig } from './bridge';
-import { OfflineError, QueueFullError, TimeoutError } from './errors';
+import { OfflineError, QueueFullError, TimeoutError, NetworkError } from './errors';
 import type { SupportedLocale } from './i18n/types';
 
 const QUEUE_STORAGE_KEY = 'bridge_sdk_offline_queue';
@@ -242,6 +242,57 @@ export class OfflineBridgeClient extends BridgeClient {
     options?: RequestOptions,
     idempotencyKey?: string,
   ): Promise<T> {
+    try {
+      return await super.request<T>(method, path, body, params, options, idempotencyKey);
+    } catch (err) {
+      if (this.autoQueue && this.isNetworkError(err)) {
+        const id = await this.offlineQueue.enqueue({
+          method,
+          path,
+          body,
+          params,
+          idempotencyKey,
+        });
+        throw new OfflineError(id, { locale: this.locale });
+      }
+      throw err;
+    }
+  }
 
+  private async executeQueueEntry(entry: QueueEntry): Promise<unknown> {
+    return super.request(
+      entry.method,
+      entry.path,
+      entry.body,
+      entry.params,
+      undefined,
+      entry.idempotencyKey,
+    );
+  }
 
-/* … truncated 1637 chars — edit only what you need near the top … */
+  private shouldRetry(err: unknown): boolean {
+    return this.isNetworkError(err);
+  }
+
+  private isNetworkError(err: unknown): boolean {
+    if (err instanceof TimeoutError) return false;
+    // #843 fix: by the time super.request() rejects, a fetch TypeError has
+    // already been wrapped into a NetworkError (a BridgeError). Check the
+    // type directly so Node/undici ("fetch failed") and Safari ("Load failed")
+    // are recognised, not just Chrome/Firefox message text.
+    if (err instanceof NetworkError) return true;
+    if (err instanceof TypeError) return true;
+    if (err instanceof Error) {
+      const msg = err.message.toLowerCase();
+      return (
+        msg.includes('failed to fetch') ||
+        msg.includes('fetch failed') ||
+        msg.includes('load failed') ||
+        msg.includes('network') ||
+        msg.includes('econnrefused') ||
+        msg.includes('enotfound')
+      );
+    }
+    return false;
+  }
+}
