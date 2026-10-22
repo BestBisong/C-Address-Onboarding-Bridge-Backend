@@ -36,7 +36,10 @@ export function getNativeAssetContractId(network: 'testnet' | 'mainnet' = 'testn
 
 // ─── Address Validation ───────────────────────────────────────────────────────
 
-/** Returns `true` if the string is a valid SAC token contract address (C-address). */
+/**
+ * Returns `true` if the string is a valid SAC token contract address
+ * (C-address), including its StrKey checksum.
+ */
 export function isSacTokenAddress(address: string): boolean {
   return isValidContractStrKey(address);
 }

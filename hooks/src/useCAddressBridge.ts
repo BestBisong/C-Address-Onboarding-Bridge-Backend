@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { BridgeClient, type BridgeClientConfig } from '@c-address-bridge/sdk';
 
 /**
@@ -6,38 +6,16 @@ import { BridgeClient, type BridgeClientConfig } from '@c-address-bridge/sdk';
  * new client (and its request cache) is only created when the config
  * actually changes rather than on every render.
  *
- * The client is keyed on each individual config field; function-valued
- * options such as `retry.logger` are compared by reference, so passing a new
- * callback creates a new client. Callers should therefore memoise callbacks
- * (e.g. with `useCallback`/`useMemo`), or keep the config object stable,
- * to avoid recreating the client on every render.
+ * The memoized client is destroyed when the component unmounts or when the
+ * config changes, so its telemetry timer does not outlive the component. In
+ * browsers `unref()` does not exist, so without this every re-configured
+ * component would leave an interval behind forever (#858).
  */
 export function useCAddressBridge(config: BridgeClientConfig): BridgeClient {
-  const { baseUrl, apiKey, locale, signing, retry, cache, telemetry } = config;
+  const configKey = JSON.stringify(config);
+  const client = useMemo(() => new BridgeClient(config), [configKey]);
 
-  return useMemo(
-    () => new BridgeClient(config),
-    // Keyed on the fields below rather than on the object identity.
-    [
-      baseUrl,
-      apiKey,
-      locale,
-      signing?.enabled,
-      signing?.clockSkewToleranceMs,
-      retry?.maxRetries,
-      retry?.baseDelayMs,
-      retry?.maxDelayMs,
-      retry?.retryBudgetMs,
-      retry?.jitterMs,
-      retry?.logger,
-      cache?.quoteTtlMs,
-      cache?.statusTtlMs,
-      cache?.healthTtlMs,
-      cache?.staleWhileRevalidate,
-      cache?.maxEntries,
-      telemetry?.endpoint,
-      telemetry?.enabled,
-      telemetry?.intervalMs,
-    ],
-  );
+  useEffect(() => () => client.destroy(), [client]);
+
+  return client;
 }
