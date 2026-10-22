@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Contract deployment automation script for C-Address Onboarding Bridge
 # Usage: ./scripts/deploy.sh [--network testnet|mainnet|custom] [--dry-run] [--skip-build]
+#
+# DEPRECATED: This script is superseded by scripts/deploy-contract.sh, which
+# matches the current contract initialize signature. It is kept only for the
+# legacy rollback/artifact flow and will be removed in a future release.
+# New deployments (including CI) should use scripts/deploy-contract.sh.
 
 set -euo pipefail
 
@@ -92,6 +97,12 @@ case "$NETWORK" in
 esac
 
 SOURCE_ACCOUNT="${SOURCE_ACCOUNT:?SOURCE_ACCOUNT (Stellar secret key) is required}"
+# Admin addresses are public keys (G...), never the secret key. Comma-separated.
+ADMIN_ADDRESSES="${ADMIN_ADDRESSES:?ADMIN_ADDRESSES (comma-separated public keys) is required}"
+ADMIN_THRESHOLD="${ADMIN_THRESHOLD:-1}"
+MAX_FEE_BPS="${MAX_FEE_BPS:-100}"
+MIN_AMOUNT="${MIN_AMOUNT:-1}"
+MAX_AMOUNT="${MAX_AMOUNT:-1000000000}"
 ARTIFACT_FILE="${ARTIFACTS_DIR}/deployment-${ENVIRONMENT:-${NETWORK}}.json"
 
 log()  { echo "[$(date -u +%H:%M:%SZ)] $*"; }
@@ -136,7 +147,7 @@ build_contract() {
 # ── step 2: deploy ────────────────────────────────────────────────────────────
 deploy_contract() {
   local wasm_path
-  wasm_path=$(find target/wasm32-unknown-unknown/release -name "onboarding_bridge.wasm" | head -1)
+  wasm_path=$(find "$CONTRACT_DIR/target/wasm32v1-none/release" -name "onboarding_bridge.wasm" | head -1)
   [[ -z "$wasm_path" ]] && err "WASM not found. Run without --skip-build."
 
   log "Deploying contract from $wasm_path..."
@@ -157,15 +168,22 @@ deploy_contract() {
 # ── step 3: initialize ────────────────────────────────────────────────────────
 initialize_contract() {
   local fee_bps="${BRIDGE_FEE_BPS:-30}"
-  log "Initializing contract with fee_bps=$fee_bps..."
+  # Build the admins Vec<Address> argument from public keys only.
+  local admins_json
+  admins_json=$(printf '%s' "$ADMIN_ADDRESSES" | tr ',' '\n' | sed '/^$/d' | jq -R . | jq -s .)
+  log "Initializing contract with admins=$admins_json threshold=$ADMIN_THRESHOLD fee_bps=$fee_bps..."
   stellar contract invoke \
     --id "$CONTRACT_ID" \
     --rpc-url "$RPC_URL" \
     --network-passphrase "$NETWORK_PASSPHRASE" \
     --source "$SOURCE_ACCOUNT" \
     -- initialize \
-    --admin "$SOURCE_ACCOUNT" \
-    --fee_bps "$fee_bps"
+    --admins "$admins_json" \
+    --threshold "$ADMIN_THRESHOLD" \
+    --fee_bps "$fee_bps" \
+    --max_fee_bps "$MAX_FEE_BPS" \
+    --min_amount "$MIN_AMOUNT" \
+    --max_amount "$MAX_AMOUNT"
   log "Contract initialized."
 }
 

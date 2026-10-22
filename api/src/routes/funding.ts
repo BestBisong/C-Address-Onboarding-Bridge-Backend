@@ -66,6 +66,7 @@ fundingRouter.post('/prepare', fundEndpointRateLimit, idempotencyMiddleware, asy
     const prepared = await sorobanService.prepareFundingTransaction(
       body.sourceAddress,
       body.targetAddress,
+      body.tokenAddress,
       body.amount,
       body.memo,
     );

@@ -32,6 +32,11 @@ export interface TokenMetadataParams {
 export interface RequestOptions {
   timeout?: number;
   /**
+   * Optional signal used to cancel the request. When aborted, the in-flight
+   * request rejects with an `AbortError` and no further retries are attempted.
+   */
+  signal?: AbortSignal;
+  /**
    * Idempotency key for non-idempotent POSTs (e.g. fund submission). Reuse the
    * same key when re-submitting the same transaction so the server can
    * deduplicate it; a key is generated per call when omitted.
@@ -220,7 +225,7 @@ export interface AutoPaginateOptions {
   signal?: AbortSignal;
 }
 
-export type PageFetcher<T> = (params: PaginatedRequestParams) => Promise<PaginatedResponse<T>>;
+export type PageFetcher<T> = (params: PaginatedRequestParams, signal?: AbortSignal) => Promise<PaginatedResponse<T>>;
 
 // Offline queue
 
