@@ -90,7 +90,7 @@ export const config = {
   transak: {
     apiKey: process.env.TRANSAK_API_KEY || '',
     environment: process.env.TRANSAK_ENVIRONMENT || 'STAGING',
-    webhookSecret: process.env.TRANSAK_WEBHOOK_SECRET || '',
+    webhookSecret: requireEnvInProduction('TRANSAK_WEBHOOK_SECRET'),
   },
   /** Exchange API credentials for CEX withdrawal routing. Unauthenticated when empty. */
   cex: {
