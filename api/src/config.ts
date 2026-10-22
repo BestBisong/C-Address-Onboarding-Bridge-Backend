@@ -84,6 +84,8 @@ export const config = {
   moonpay: {
     apiKey: process.env.MOONPAY_API_KEY || '',
     secretKey: process.env.MOONPAY_SECRET_KEY || '',
+    /** Use the MoonPay sandbox host (buy-sandbox.moonpay.com) instead of production. */
+    sandbox: process.env.MOONPAY_SANDBOX === 'true' || process.env.MOONPAY_ENVIRONMENT === 'sandbox',
   },
   transak: {
     apiKey: process.env.TRANSAK_API_KEY || '',
