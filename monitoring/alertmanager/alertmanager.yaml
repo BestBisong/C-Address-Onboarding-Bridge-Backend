@@ -27,6 +27,16 @@ route:
   repeat_interval: 4h
 
   routes:
+    # ── Blockchain / Soroban team ─────────────────────────────
+    # Must come before the severity routes: those end with
+    # `continue: false`, which would otherwise stop evaluation before
+    # this route is reached. `continue: true` lets blockchain alerts
+    # still fall through to their severity receivers below.
+    - match:
+        team: blockchain
+      receiver: slack-blockchain
+      continue: true
+
     # ── Critical alerts → PagerDuty ──────────────────────────
     - matchers:
         - severity = "critical"

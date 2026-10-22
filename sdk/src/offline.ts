@@ -85,6 +85,9 @@ export class OfflineQueue {
     // #262 fix: generate a stable idempotency key once at enqueue time for
     // non-idempotent POST operations. The same key is sent on every replay so
     // the server can deduplicate submissions caused by connection failures.
+    // #846 fix: when the caller already supplied the key used on the failed
+    // attempt, reuse it verbatim so a replay cannot duplicate a submission
+    // that may have reached the server.
     const idempotencyKey =
       entry.method === 'POST' && NON_IDEMPOTENT_POST_PATHS.has(entry.path)
         ? entry.idempotencyKey ?? generateIdempotencyKey()
@@ -138,30 +141,42 @@ export class OfflineQueue {
     if (this.replaying || this.queue.length === 0) return;
     this.replaying = true;
 
-    const remaining: QueueEntry[] = [];
     let processedCount = 0;
 
-    for (const entry of this.queue) {
-      try {
-        await this.executeEntry(entry);
-        processedCount++;
-      } catch (err) {
-        if (!this.shouldRetry(err)) {
-          this.deadLetters.push(entry);
-          continue;
-        }
-        entry.retryCount++;
-        if (entry.retryCount >= this.maxRetries) {
-          this.deadLetters.push(entry);
-          continue;
-        }
-        remaining.push(entry);
-      }
-    }
+    try {
+      // #849 fix: iterate a snapshot and remove each processed entry by id
+      // instead of reassigning this.queue. Entries enqueued (or cleared) while
+      // the replay is awaiting executeEntry() are preserved.
+      const snapshot = [...this.queue];
 
-    this.queue = remaining;
-    await this.persistToStorage();
-    this.replaying = false;
+      for (const entry of snapshot) {
+        try {
+          await this.executeEntry(entry);
+          processedCount++;
+          this.removeById(entry.id);
+        } catch (err) {
+          if (!this.shouldRetry(err)) {
+            this.deadLetters.push(entry);
+            this.removeById(entry.id);
+            continue;
+          }
+          entry.retryCount++;
+          if (entry.retryCount >= this.maxRetries) {
+            this.deadLetters.push(entry);
+            this.removeById(entry.id);
+            continue;
+          }
+          // Keep the entry queued for a later replay; retryCount is persisted
+          // below via persistToStorage().
+        }
+      }
+
+      await this.persistToStorage();
+    } finally {
+      // #849 fix: always reset the replaying flag, even if executeEntry()
+      // throws something shouldRetry() does not handle.
+      this.replaying = false;
+    }
 
     if (processedCount > 0) {
       const at = new Date().toISOString();
@@ -171,6 +186,12 @@ export class OfflineQueue {
         } catch {}
       }
     }
+  }
+
+  /** Removes a single entry from the queue by id, preserving all others. */
+  private removeById(id: string): void {
+    const idx = this.queue.findIndex((e) => e.id === id);
+    if (idx !== -1) this.queue.splice(idx, 1);
   }
 
   private async loadFromStorage(): Promise<void> {
