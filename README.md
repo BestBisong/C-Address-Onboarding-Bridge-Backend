@@ -852,6 +852,11 @@ MIT — see [LICENSE](LICENSE) for details.
 <!-- handsoff-issue-596 -->
 - #596: test(contract): fix and un-ignore test_full_scenario
 
+<!-- handsoff-issue-802 -->
+- #802: bug(contract): route_from_exchange checks the reentrancy guard but never sets it
+
+<!-- handsoff-issue-805 -->
+- #805: bug(contract): approvals from removed admins still count after RotateAdmins (#580 closed)
 <!-- handsoff-issue-790 -->
 - #790: bug(contract): WithdrawFees with amount = 0 transfers the cross-token AccumulatedFees total in a single token
 
