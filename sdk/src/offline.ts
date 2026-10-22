@@ -1,4 +1,4 @@
-import { QueueEntry, OfflineQueueOptions, StorageAdapter, RequestOptions, HttpMethod } from './types.js';
+import { QueueEntry, OfflineQueueEvent, OfflineQueueOptions, StorageAdapter, RequestOptions, HttpMethod } from './types.js';
 import { BridgeClient, BridgeClientConfig } from './bridge.js';
 import { OfflineError, QueueFullError, TimeoutError, NetworkError } from './errors.js';
 import type { SupportedLocale } from './i18n/types.js';
@@ -20,6 +20,7 @@ const NON_IDEMPOTENT_POST_PATHS: ReadonlySet<string> = new Set([
 ]);
 
 type DrainHandler = (count: number, at: string) => void;
+type QueueEventHandler = (event: OfflineQueueEvent) => void;
 
 export class OfflineQueue {
   private queue: QueueEntry[] = [];
@@ -31,6 +32,7 @@ export class OfflineQueue {
   private serverOnline = true;
   private replaying = false;
   private readonly drainHandlers: DrainHandler[] = [];
+  private readonly eventHandlers: QueueEventHandler[] = [];
   private readonly deadLetters: QueueEntry[] = [];
 
   /**
@@ -130,6 +132,11 @@ export class OfflineQueue {
     this.drainHandlers.push(handler);
   }
 
+  /** Register a callback for each replayed or dead-lettered entry. */
+  onEvent(handler: QueueEventHandler): void {
+    this.eventHandlers.push(handler);
+  }
+
   /** Manually signal connectivity state; triggers replay when transitioning online. */
   setOnline(online: boolean): void {
     const wasOffline = !this.serverOnline;
@@ -226,6 +233,14 @@ export class OfflineQueue {
     try {
       await this.storage.set(QUEUE_STORAGE_KEY, JSON.stringify(this.queue));
     } catch {}
+  }
+
+  private emitQueueEvent(event: OfflineQueueEvent): void {
+    for (const handler of this.eventHandlers) {
+      try {
+        handler(event);
+      } catch {}
+    }
   }
 }
 
