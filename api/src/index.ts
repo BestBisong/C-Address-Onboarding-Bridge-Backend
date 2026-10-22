@@ -32,6 +32,7 @@ import { setFeeRateBps, updateCircuitBreakerMetrics } from './services/metrics';
 import { securityMiddleware, contentTypeEnforcement, suspiciousRateLimiting, xssErrorSanitizer } from './middleware/security';
 import { requestTracker } from './middleware/requestTracker';
 import { loggingMiddleware } from './middleware/logging';
+import { DEFAULT_JSON_LIMIT, FUNDING_PATHS, fundingJsonParser } from './middleware/bodyParser';
 import { requestSigningMiddleware } from './middleware/requestSigning';
 import { gracefulShutdown, registerSignalHandlers } from './shutdown';
 import { closePool } from './services/db';
@@ -154,7 +155,8 @@ app.use(requestTracker);
 app.use(loggingMiddleware);
 
 app.use('/api/webhook', express.text({ type: '*/*' }));
-app.use('/api', express.json({ limit: '32kb' }));
+app.use(FUNDING_PATHS, fundingJsonParser);
+app.use('/api', express.json({ limit: DEFAULT_JSON_LIMIT }));
 
 // suspiciousRateLimiting is mounted exactly once here. It only counts requests
 // that actually tripped a detector (see middleware/security.ts), so normal
@@ -201,6 +203,24 @@ app.use('/api/v1/admin', rbacAuth, tierRateLimitMiddleware, adminRouter);
 app.use('/api/v1/cache/metrics', rbacAuth, tierRateLimitMiddleware, cacheMetricsRouter);
 
 // Prometheus metrics — internal only, protected by RBAC
-app.use('
+app.use('/api/v1/metrics', rbacAuth, metricsRouter);
 
-/* … truncated 579 chars — edit only what you need near the top … */
+app.use('/api/v1/token', rbacAuth, requireScopes('quote:read'), tierRateLimitMiddleware, tokenRouter);
+app.use('/api/v2/token', rbacAuth, requireScopes('quote:read'), tierRateLimitMiddleware, tokenRouter);
+
+app.use(xssErrorSanitizer);
+app.use(errorHandler);
+
+const server = app.listen(config.port, () => {
+  logger.info({ port: config.port, env: config.env }, 'Server started');
+});
+
+const wss = createWebSocketServer(server);
+server.on('upgrade', (req, socket, head) => handleUpgrade(wss, req, socket, head));
+
+registerSignalHandlers(async () => {
+  await shutdownTracing();
+  await closePool();
+});
+
+export { app, server, wss };
