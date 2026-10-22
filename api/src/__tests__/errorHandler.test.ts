@@ -16,6 +16,7 @@ vi.mock('../logger', () => {
 
 import { errorHandler, AppError } from '../middleware/error';
 import { xssErrorSanitizer } from '../middleware/security';
+import { applyRateLimitHeaders } from '../middleware/rateLimit';
 
 function makeReq(): Request {
   return {} as Request;

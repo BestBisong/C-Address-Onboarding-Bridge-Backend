@@ -26,7 +26,7 @@ import { compressionMiddleware } from './middleware/compression';
 import { errorHandler } from './middleware/error';
 import { circuitBreakers } from './circuit-breaker';
 import { versionCompatibility } from './middleware/versioning';
-import { ipRateLimitMiddleware, applyRateLimitHeaders, tierRateLimitMiddleware, telemetryRateLimit } from './middleware/rateLimit';
+import { ipRateLimitMiddleware, tierRateLimitMiddleware, telemetryRateLimit } from './middleware/rateLimit';
 import { correlationMiddleware } from './middleware/correlation';
 import { setFeeRateBps, updateCircuitBreakerMetrics } from './services/metrics';
 import { securityMiddleware, contentTypeEnforcement, suspiciousRateLimiting, xssErrorSanitizer } from './middleware/security';
@@ -87,7 +87,10 @@ app.use(compressionMiddleware);
 app.use(versionCompatibility);
 app.use(correlationMiddleware);
 app.use(ipRateLimitMiddleware);
-app.use(applyRateLimitHeaders);
+// #809: X-RateLimit-* headers are already emitted by express-rate-limit
+// (standardHeaders: true). applyRateLimitHeaders is a helper, not middleware,
+// so it must not be mounted with app.use (Express would treat its 4-arg
+// signature as an error handler).
 
 // Prometheus instrumentation middleware
 app.use((req, res, next) => {
